@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neoiot_emqx_hook.fullname" . }}
+  labels:
+    {{- include "neoiot_emqx_hook.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    {{- include "neoiot_emqx_hook.selectorLabels" . | nindent 4 }}

@@ -1,0 +1,23 @@
+[package]
+name = "neoiot_emqx_hook"
+version = "0.1.0"
+authors = ["Tian Pengfei <itsneo1990@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tonic = "0.4"
+tonic-health = "0.3.1"
+prost = "0.7"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.7"
+chrono = { version = "0.4", features = ["serde"] }
+rdkafka = { version = "0.25", features = ["cmake-build"] }
+base64 = "0.13.0"
+
+[build-dependencies]
+tonic-build = "0.4"
