@@ -13,15 +13,17 @@ use proto::{
     SessionUnsubscribedRequest, ValuedResponse,
 };
 
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::ClientConfig;
+use chrono::{TimeZone, Utc};
+use rdkafka::{
+    producer::{FutureProducer, FutureRecord},
+    ClientConfig,
+};
 use serde_json::json;
-use std::collections::HashMap;
-use std::env;
-use std::sync::Arc;
-use std::time::Duration;
-use tonic::transport::{NamedService, Server};
-use tonic::{Request, Response, Status};
+use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use tonic::{
+    transport::{NamedService, Server},
+    Request, Response, Status,
+};
 
 const ALL_HOOKS: [&str; 13] = [
     "ON_CLIENT_CONNECT",
@@ -368,10 +370,10 @@ impl HookProvider for HookProviderService {
                 "node": message.node,
                 "id": message.id,
                 "qos": message.qos,
-                "from": message.from,
+                "from_client_id": message.from,
                 "topic": message.topic,
-            "payload": base64::encode(message.payload),
-                "timestamp": message.timestamp,
+                "payload": base64::encode(message.payload),
+                "time": Utc.timestamp_millis(message.timestamp as i64).to_rfc3339()
             });
             self.publish("message.publish", &data).await;
         }
@@ -388,13 +390,15 @@ impl HookProvider for HookProviderService {
         let req = request.into_inner();
         if let Some(message) = req.message {
             let mut data = json!({
+                "client_id": "",
+                "username": "",
                 "node": message.node,
                 "id": message.id,
                 "qos": message.qos,
                 "from": message.from,
                 "topic": message.topic,
                 "payload": message.payload,
-                "timestamp": message.timestamp}
+                "time": Utc.timestamp_millis(message.timestamp as i64).to_rfc3339()}
             );
             if let Some(client_info) = req.clientinfo {
                 data["client_id"] = json!(client_info.clientid);
@@ -425,7 +429,8 @@ impl HookProvider for HookProviderService {
                 "from": message.from,
                 "topic": message.topic,
                 "payload": message.payload,
-                "timestamp": message.timestamp}
+                "time": Utc.timestamp_millis(message.timestamp as i64).to_rfc3339()
+            }
             );
             if let Some(client_info) = req.clientinfo {
                 data["client_id"] = json!(client_info.clientid);
