@@ -1,6 +1,7 @@
-pub mod proto {
-    tonic::include_proto!("emqx.exhook.v1");
-}
+mod proto;
+// pub mod proto {
+//     tonic::include_proto!("emqx.exhook.v1");
+// }
 
 use proto::{
     hook_provider_server::HookProvider, hook_provider_server::HookProviderServer,
@@ -366,13 +367,26 @@ impl HookProvider for HookProviderService {
     ) -> Result<Response<ValuedResponse>, Status> {
         let req = request.into_inner();
         if let Some(message) = req.message {
+            let encoding;
+            let payload;
+            match String::from_utf8(message.payload.clone()) {
+                Ok(payload_str) => {
+                    encoding = "plain";
+                    payload = payload_str;
+                }
+                Err(_) => {
+                    encoding = "base64";
+                    payload = base64::encode(message.payload);
+                }
+            }
             let data = json!({
                 "node": message.node,
                 "id": message.id,
                 "qos": message.qos,
                 "from_client_id": message.from,
                 "topic": message.topic,
-                "payload": base64::encode(message.payload),
+                "encoding": encoding,
+                "payload": payload,
                 "time": Utc.timestamp_millis(message.timestamp as i64).to_rfc3339()
             });
             self.publish("message.publish", &data).await;
