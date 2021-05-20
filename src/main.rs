@@ -27,17 +27,21 @@ use rdkafka::{
     ClientConfig,
 };
 use serde_json::json;
-use std::time::Duration;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::Duration;
 use tonic::{transport::Server, Request, Response, Status};
 
 struct HookProviderService {
     settings: Settings,
     kafka_producer: FutureProducer,
     auth: AuthPostgres,
+    metrics: Arc<RwLock<BTreeMap<String, usize>>>,
 }
 
 impl HookProviderService {
-    async fn new() -> HookProviderService {
+    async fn new() -> (HookProviderService, Arc<RwLock<BTreeMap<String, usize>>>) {
         let settings = Settings::new().unwrap();
         println!("settings: {:#?}", settings);
         let producer = ClientConfig::new()
@@ -45,30 +49,31 @@ impl HookProviderService {
             .set("message.timeout.ms", "5000")
             .create()
             .expect("Producer creation error");
-        HookProviderService {
-            auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
-            kafka_producer: producer,
-            settings: settings.clone(),
-        }
+        let metrics = Arc::new(RwLock::new(BTreeMap::new()));
+        return (
+            HookProviderService {
+                auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
+                kafka_producer: producer,
+                settings: settings.clone(),
+                metrics: metrics.clone(),
+            },
+            metrics,
+        );
     }
     async fn publish(&self, topic: &str, data: &serde_json::Value) {
+        {
+            let mut metrics = self.metrics.write().await;
+            let v = metrics.entry(topic.to_string()).or_insert(0);
+            *v += 1;
+        }
         let payload = &data.to_string();
         let record: FutureRecord<String, String> = FutureRecord::to(&topic).payload(payload);
         let status = self
             .kafka_producer
             .send(record, Duration::from_secs(5))
             .await;
-        match status {
-            Ok(_) => {
-                println!("{} delivered success", topic)
-            }
-            Err((err, _)) => {
-                println!(
-                    "message deliver failed to {}, err: {}",
-                    topic,
-                    err.to_string()
-                )
-            }
+        if let Err((err, _)) = status {
+            println!("message deliver failed to {}: {}", topic, err.to_string())
         }
     }
 }
@@ -507,12 +512,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     health_reporter
         .set_serving::<HookProviderServer<HookProviderService>>()
         .await;
-    let svc = HookProviderServer::new(HookProviderService::new().await);
+    let (svc, metrics) = HookProviderService::new().await;
     let addr = "0.0.0.0:10000".parse().unwrap();
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            println!("metrics: {:#?}", metrics.read().await)
+        }
+    });
 
     println!("HealthServer + HookProviderServer listening on {}", addr);
     Server::builder()
-        .add_service(svc)
+        .add_service(HookProviderServer::new(svc))
         .add_service(health_service)
         .serve(addr)
         .await?;

@@ -29,3 +29,7 @@ version: ; $(info $(M) 当前仓库 Git 版本:)	@ ## 显示当前仓库 Git 版
 .PHONY: docker
 docker: ; $(info $(M) make docker:)	@ ## 显示帮助信息
 	docker build -t itsneo1990/neoiot_emqx_hook:latest .
+
+.PHONY: helm
+helm: ; $(info $(M) make docker:)	@ ## 显示帮助信息
+	helm upgrade -n neoiot emqx.exhook charts
