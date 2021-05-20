@@ -48,6 +48,7 @@ impl AuthPostgres {
     }
 
     async fn _query_user(&self, username: &str, password: &str) -> Result<UserInfo> {
+        println!("fetching remote user data");
         let user = sqlx::query_as::<_, UserInfo>(Q_USER)
             .bind(username)
             .fetch_one(&self.pg_pool)
@@ -76,6 +77,7 @@ impl AuthPostgres {
     }
 
     async fn _query_acl(&self, username: &str) -> Result<[Vec<String>; 2]> {
+        println!("fetching remote acl rules");
         let user = sqlx::query_as::<_, Acl>(Q_ACL)
             .bind(username)
             .fetch_one(&self.pg_pool)

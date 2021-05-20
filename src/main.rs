@@ -229,7 +229,7 @@ impl HookProvider for HookProviderService {
                 .await;
             if verified {
                 return Ok(Response::new(ValuedResponse {
-                    r#type: ResponsedType::Continue as i32,
+                    r#type: ResponsedType::StopAndReturn as i32,
                     value: Some(Value::BoolResult(true)),
                 }));
             };
@@ -249,7 +249,7 @@ impl HookProvider for HookProviderService {
         let passed = self.auth.check_acl(&username, req.r#type, &req.topic).await;
         if passed {
             Ok(Response::new(ValuedResponse {
-                r#type: ResponsedType::Continue as i32,
+                r#type: ResponsedType::StopAndReturn as i32,
                 value: Some(Value::BoolResult(true)),
             }))
         } else {
