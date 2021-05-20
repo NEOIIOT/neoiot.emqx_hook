@@ -1,5 +1,5 @@
 mod auth;
-// mod proto;
+mod config;
 
 pub mod proto {
     tonic::include_proto!("emqx.exhook.v1");
@@ -9,102 +9,67 @@ use proto::{
     hook_provider_server::HookProvider, hook_provider_server::HookProviderServer,
     ClientAuthenticateRequest, ClientCheckAclRequest, ClientConnackRequest, ClientConnectRequest,
     ClientConnectedRequest, ClientDisconnectedRequest, ClientSubscribeRequest,
-    ClientUnsubscribeRequest, EmptySuccess, HookSpec, LoadedResponse, MessageAckedRequest,
+    ClientUnsubscribeRequest, EmptySuccess, LoadedResponse, MessageAckedRequest,
     MessageDeliveredRequest, MessageDroppedRequest, MessagePublishRequest, ProviderLoadedRequest,
     ProviderUnloadedRequest, SessionCreatedRequest, SessionDiscardedRequest, SessionResumedRequest,
     SessionSubscribedRequest, SessionTakeoveredRequest, SessionTerminatedRequest,
     SessionUnsubscribedRequest, ValuedResponse,
 };
 
-use crate::auth::AuthPostgres;
-use crate::proto::valued_response::{ResponsedType, Value};
+use crate::{
+    auth::AuthPostgres,
+    config::Settings,
+    proto::valued_response::{ResponsedType, Value},
+};
 use chrono::{TimeZone, Utc};
 use rdkafka::{
     producer::{FutureProducer, FutureRecord},
     ClientConfig,
 };
 use serde_json::json;
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
-use tonic::{
-    transport::{NamedService, Server},
-    Request, Response, Status,
-};
-
-const AVAILABLE_HOOKS: [&str; 13] = [
-    "ON_CLIENT_CONNECT",
-    "ON_CLIENT_CONNACK",
-    "ON_CLIENT_CONNECTED",
-    "ON_CLIENT_DISCONNECTED",
-    "ON_CLIENT_SUBSCRIBE",
-    "ON_CLIENT_UNSUBSCRIBE",
-    "ON_SESSION_CREATED",
-    "ON_SESSION_SUBSCRIBED",
-    "ON_SESSION_UNSUBSCRIBED",
-    "ON_SESSION_TERMINATED",
-    "ON_MESSAGE_PUBLISH",
-    "ON_MESSAGE_DELIVERED",
-    "ON_MESSAGE_ACKED",
-    // "ON_SESSION_RESUMED",
-    // "ON_SESSION_DISCARDED",
-    // "ON_SESSION_TAKEOVERED",
-    // "ON_MESSAGE_DROPPED",
-];
+use std::time::Duration;
+use tonic::{transport::Server, Request, Response, Status};
 
 struct HookProviderService {
-    loaded_hooks: Arc<HashMap<String, KafkaConfig>>,
-    producer: FutureProducer,
+    settings: Settings,
+    kafka_producer: FutureProducer,
     auth: AuthPostgres,
 }
 
 impl HookProviderService {
     async fn new() -> HookProviderService {
-        let brokers = env::var("KAFKA_BROKERS").expect("KAFKA_BROKERS must set");
-        println!("brokers: {:?}", brokers);
+        let settings = Settings::new().unwrap();
+        println!("settings: {:#?}", settings);
         let producer = ClientConfig::new()
-            .set("bootstrap.servers", brokers)
+            .set("bootstrap.servers", &settings.kafka_brokers)
             .set("message.timeout.ms", "5000")
             .create()
             .expect("Producer creation error");
         HookProviderService {
-            loaded_hooks: Arc::new(Self::load_hooks()),
-            producer,
-            auth: AuthPostgres::new().await,
+            auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
+            kafka_producer: producer,
+            settings: settings.clone(),
         }
     }
-    async fn publish(&self, hook: &str, data: &serde_json::Value) {
-        let payload = data.to_string();
-        if let Some(config) = self.loaded_hooks.get(hook) {
-            let record: FutureRecord<String, String> =
-                FutureRecord::to(&config.topic).payload(&payload);
-            let status = self.producer.send(record, Duration::from_secs(5)).await;
-            match status {
-                Ok(_) => {
-                    println!("{} delivered success", &config.topic)
-                }
-                Err((err, _)) => {
-                    println!(
-                        "message deliver failed to {}, err: {}",
-                        config.topic,
-                        err.to_string()
-                    )
-                }
+    async fn publish(&self, topic: &str, data: &serde_json::Value) {
+        let payload = &data.to_string();
+        let record: FutureRecord<String, String> = FutureRecord::to(&topic).payload(payload);
+        let status = self
+            .kafka_producer
+            .send(record, Duration::from_secs(5))
+            .await;
+        match status {
+            Ok(_) => {
+                println!("{} delivered success", topic)
+            }
+            Err((err, _)) => {
+                println!(
+                    "message deliver failed to {}, err: {}",
+                    topic,
+                    err.to_string()
+                )
             }
         }
-    }
-    fn load_hooks() -> HashMap<String, KafkaConfig> {
-        let mut result = HashMap::new();
-        for &hook in AVAILABLE_HOOKS.iter() {
-            if let Ok(topic) = env::var(format!("{}_TO_TOPIC", hook)) {
-                let action = hook[3..].replace("_", ".").to_lowercase();
-                let filters = env::var(format!("{}_FILTERS", hook))
-                    .unwrap_or_else(|_| "#".to_string())
-                    .split(',')
-                    .map(String::from)
-                    .collect();
-                result.insert(action, KafkaConfig { topic, filters });
-            }
-        }
-        result
     }
 }
 
@@ -116,23 +81,9 @@ impl HookProvider for HookProviderService {
     ) -> Result<Response<LoadedResponse>, Status> {
         let broker = request.into_inner().broker.unwrap();
         println!("broker connected = {:?}", broker.sysdescr);
-        let mut hook_specs = vec![
-            HookSpec {
-                name: "client.authenticate".to_string(),
-                topics: vec![],
-            },
-            HookSpec {
-                name: "client.check_acl".to_string(),
-                topics: vec![],
-            },
-        ];
-        for (hook, config) in self.loaded_hooks.iter() {
-            hook_specs.push(HookSpec {
-                name: hook.clone(),
-                topics: config.filters.clone(),
-            })
-        }
-        Ok(Response::new(LoadedResponse { hooks: hook_specs }))
+        Ok(Response::new(LoadedResponse {
+            hooks: self.settings.loaded_hooks(),
+        }))
     }
 
     async fn on_provider_unloaded(
@@ -156,7 +107,11 @@ impl HookProvider for HookProviderService {
                 "proto_version": conn_info.proto_ver,
                 "keepalive": conn_info.keepalive,
             });
-            self.publish("client.connect", &data).await;
+            self.publish(
+                &self.settings.on_client_connect.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         };
         Ok(Response::new(EmptySuccess {}))
     }
@@ -176,7 +131,11 @@ impl HookProvider for HookProviderService {
                 "proto_version": conn_info.proto_ver,
                 "conn_ack": req.result_code,
             });
-            self.publish("client.connack", &data).await;
+            self.publish(
+                &self.settings.on_client_connack.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -195,7 +154,11 @@ impl HookProvider for HookProviderService {
                 "protocol": conn_info.protocol,
                 "connected_at": chrono::Utc::now().to_rfc3339(),
             });
-            self.publish("client.connected", &data).await;
+            self.publish(
+                &self.settings.on_client_connected.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -213,7 +176,11 @@ impl HookProvider for HookProviderService {
                 "disconnected_at": chrono::Utc::now().to_rfc3339(),
                 "reason": req.reason,
             });
-            self.publish("client.disconnected", &data).await;
+            self.publish(
+                &self.settings.on_client_disconnected.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -275,7 +242,11 @@ impl HookProvider for HookProviderService {
                     .map(|t| json!({"name": t.name, "qos": t.qos}))
                     .collect::<Vec<_>>(),
             });
-            self.publish("client.subscribe", &data).await;
+            self.publish(
+                &self.settings.on_client_subscribe.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         };
         Ok(Response::new(EmptySuccess {}))
     }
@@ -296,7 +267,11 @@ impl HookProvider for HookProviderService {
                     .map(|t| json!({"name": t.name, "qos": t.qos}))
                     .collect::<Vec<_>>(),
             });
-            self.publish("client.unsubscribe", &data).await;
+            self.publish(
+                &self.settings.on_client_unsubscribe.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         };
         Ok(Response::new(EmptySuccess {}))
     }
@@ -312,7 +287,11 @@ impl HookProvider for HookProviderService {
                 "client_id": client_info.clientid,
                 "username": client_info.username,
             });
-            self.publish("session.created", &data).await;
+            self.publish(
+                &self.settings.on_client_created.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -338,7 +317,11 @@ impl HookProvider for HookProviderService {
                     "nl": opts.nl,
                 })
             }
-            self.publish("session.subscribed", &data).await;
+            self.publish(
+                &self.settings.on_session_subscribed.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -355,7 +338,16 @@ impl HookProvider for HookProviderService {
                 "username": client_info.username,
                 "topic": req.topic,
             });
-            self.publish("session.unsubscribed", &data).await;
+            self.publish(
+                &self
+                    .settings
+                    .on_session_unsubscribed
+                    .as_ref()
+                    .unwrap()
+                    .topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -393,7 +385,11 @@ impl HookProvider for HookProviderService {
                 "username": client_info.username,
                 "reason": req.reason,
             });
-            self.publish("client.terminated", &data).await;
+            self.publish(
+                &self.settings.on_session_terminated.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -426,7 +422,11 @@ impl HookProvider for HookProviderService {
                 "payload": payload,
                 "time": Utc.timestamp_millis(message.timestamp as i64).to_rfc3339()
             });
-            self.publish("message.publish", &data).await;
+            self.publish(
+                &self.settings.on_message_publish.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(ValuedResponse {
             r#type: 0,
@@ -455,7 +455,11 @@ impl HookProvider for HookProviderService {
                 data["client_id"] = json!(client_info.clientid);
                 data["username"] = json!(client_info.username);
             }
-            self.publish("message.delivered", &data).await;
+            self.publish(
+                &self.settings.on_message_delivered.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -487,7 +491,11 @@ impl HookProvider for HookProviderService {
                 data["client_id"] = json!(client_info.clientid);
                 data["username"] = json!(client_info.username);
             }
-            self.publish("message.acked", &data).await;
+            self.publish(
+                &self.settings.on_message_acked.as_ref().unwrap().topic,
+                &data,
+            )
+            .await;
         }
         Ok(Response::new(EmptySuccess {}))
     }
@@ -499,9 +507,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     health_reporter
         .set_serving::<HookProviderServer<HookProviderService>>()
         .await;
-    let service_name = <HookProviderServer<HookProviderService> as NamedService>::NAME;
-    println!("{}", service_name);
-
     let svc = HookProviderServer::new(HookProviderService::new().await);
     let addr = "0.0.0.0:10000".parse().unwrap();
 
@@ -512,10 +517,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve(addr)
         .await?;
     Ok(())
-}
-
-#[derive(Debug)]
-struct KafkaConfig {
-    pub topic: String,
-    pub filters: Vec<String>,
 }

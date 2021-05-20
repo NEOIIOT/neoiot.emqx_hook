@@ -11,21 +11,11 @@ image:
   tag: "latest"
 
 env:
-  POSTGRES_DSN: "postgres://neoiot:uTALXkhFg0@postgres-postgresql.neoiot.svc.cluster.local:5432/neoiot?sslmode=disable"
-  KAFKA_BROKERS: "kafka.neoiot.svc.cluster.local:9092"
-  ON_CLIENT_CONNECTED_TO_TOPIC: "emqx.events.client.connected"
-  ON_CLIENT_DISCONNECTED_TO_TOPIC: "emqx.events.client.disconnected"
-  ON_MESSAGE_PUBLISH_TO_TOPIC: "emqx.events.message.publish"
-  #  ON_CLIENT_CONNECT_TO_TOPIC: "emqx.events.client.connect"
-  #  ON_CLIENT_CONNACK_TO_TOPIC: "emqx.events.client.connack"
-  #  ON_CLIENT_SUBSCRIBE_TO_TOPIC: "emqx.events.client.subscribe"
-  #  ON_CLIENT_UNSUBSCRIBE_TO_TOPIC: "emqx.events.client.unsubscribe"
-  #  ON_SESSION_CREATED_TO_TOPIC: "emqx.events.session.created"
-  #  ON_SESSION_SUBSCRIBED_TO_TOPIC: "emqx.events.session.subscribed"
-  #  ON_SESSION_UNSUBSCRIBED_TO_TOPIC: "emqx.events.session.unsubscribed"
-  #  ON_MESSAGE_DELIVERED_TO_TOPIC: "emqx.events.message.delivered"
-  #  ON_MESSAGE_ACKED_TO_TOPIC: "emqx.events.message.acked"
-  #  ON_MESSAGE_DROPPED_TO_TOPIC: "emqx.events.message.dropped"
+  NEOIOT_POSTGRES_DSN: "postgres://neoiot:uTALXkhFg0@postgres-postgresql.neoiot.svc.cluster.local:5432/neoiot?sslmode=disable"
+  NEOIOT_KAFKA_BROKERS: "kafka.neoiot.svc.cluster.local:9092"
+  NEOIOT_ON_CLIENT_CONNECTED.TOPIC: "emqx.events.client.connected"
+  NEOIOT_ON_CLIENT_DISCONNECTED.TOPIC: "emqx.events.client.disconnected"
+  NEOIOT_ON_MESSAGE_PUBLISH.TOPIC: "emqx.events.message.publish"
 
 imagePullSecrets: [ ]
 nameOverride: ""
@@ -46,7 +36,7 @@ podSecurityContext: { }
 # fsGroup: 2000
 
 securityContext: { }
-  # capabilities:
+# capabilities:
 #   drop:
 #   - ALL
 # readOnlyRootFilesystem: true
@@ -79,7 +69,7 @@ resources: { }
   # choice for the user. This also increases chances charts run on environments with little
   # resources, such as Minikube. If you do want to specify resources, uncomment the following
   # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
+# limits:
 #   cpu: 100m
 #   memory: 128Mi
 # requests:

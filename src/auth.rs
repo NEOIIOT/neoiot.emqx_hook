@@ -1,11 +1,8 @@
 use anyhow::{anyhow, Result};
 use lru_time_cache::LruCache;
 use sqlx::{FromRow, PgPool};
-use std::collections::HashSet;
-use std::{env, sync::Arc, time};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
-
-const ACL_EXPIRES: time::Duration = time::Duration::from_secs(60);
 
 const Q_USER: &str = "SELECT mqtt_secret, is_super FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = $1 LIMIT 1";
 
@@ -17,10 +14,7 @@ pub struct UserInfo {
 
 const Q_ACL: &str = "SELECT acl_pubs, acl_subs FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = $1 LIMIT 1";
 
-const PUBLISH: i32 = 0;
-const SUBSCRIBE: i32 = 1;
-
-#[derive(FromRow)]
+#[derive(FromRow, Clone, Default)]
 pub struct Acl {
     pub acl_pubs: Vec<String>,
     pub acl_subs: Vec<String>,
@@ -28,17 +22,16 @@ pub struct Acl {
 
 pub struct AuthPostgres {
     pg_pool: PgPool,
-    acl_cache: Arc<Mutex<LruCache<String, [Vec<String>; 2]>>>,
+    acl_cache: Arc<Mutex<LruCache<String, Acl>>>,
     super_cache: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AuthPostgres {
-    pub async fn new() -> AuthPostgres {
-        let uri = env::var("POSTGRES_DSN").expect("POSTGRES_DSN must set");
-        let pg_pool = PgPool::connect(&uri)
+    pub async fn new(postgres_url: &str, acl_cache_ttl: u64) -> AuthPostgres {
+        let pg_pool = PgPool::connect(postgres_url)
             .await
             .expect("postgres connect failed");
-        let acl_cache = LruCache::with_expiry_duration(ACL_EXPIRES);
+        let acl_cache = LruCache::with_expiry_duration(Duration::from_secs(acl_cache_ttl));
         let super_cache = HashSet::new();
         return AuthPostgres {
             pg_pool,
@@ -76,16 +69,16 @@ impl AuthPostgres {
         }
     }
 
-    async fn _query_acl(&self, username: &str) -> Result<[Vec<String>; 2]> {
+    async fn _query_acl(&self, username: &str) -> Result<Acl> {
         println!("fetching remote acl rules");
-        let user = sqlx::query_as::<_, Acl>(Q_ACL)
+        let acl = sqlx::query_as::<_, Acl>(Q_ACL)
             .bind(username)
             .fetch_one(&self.pg_pool)
             .await?;
-        Ok([user.acl_pubs, user.acl_subs])
+        Ok(acl)
     }
 
-    async fn _get_acl(&self, username: &str) -> [Vec<String>; 2] {
+    async fn _get_acl(&self, username: &str) -> Acl {
         let mut c = self.acl_cache.lock().await;
         let cached = c.peek(username);
         if let Some(acl) = cached {
@@ -99,7 +92,7 @@ impl AuthPostgres {
             }
             Err(err) => {
                 println!("get new acl failed {}", err);
-                [vec![], vec![]]
+                Acl::default()
             }
         };
     }
@@ -110,14 +103,13 @@ impl AuthPostgres {
                 return true;
             }
         }
-        let [pubs, subs] = self._get_acl(username).await;
+        let acl = self._get_acl(username).await;
         let rules;
         match r#type {
-            PUBLISH => rules = pubs,
-            SUBSCRIBE => rules = subs,
+            0 => rules = acl.acl_pubs,
+            1 => rules = acl.acl_subs,
             _ => return false,
         }
-
         return rules.iter().fold(false, |prev, filter| {
             if prev {
                 true
