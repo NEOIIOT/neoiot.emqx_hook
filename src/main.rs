@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod metric;
 
 pub mod proto {
     tonic::include_proto!("emqx.exhook.v1");
@@ -27,9 +28,6 @@ use rdkafka::{
     ClientConfig,
 };
 use serde_json::json;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::time::Duration;
 use tonic::{transport::Server, Request, Response, Status};
 
@@ -37,11 +35,10 @@ struct HookProviderService {
     settings: Settings,
     kafka_producer: FutureProducer,
     auth: AuthPostgres,
-    metrics: Arc<RwLock<BTreeMap<String, usize>>>,
 }
 
 impl HookProviderService {
-    async fn new() -> (HookProviderService, Arc<RwLock<BTreeMap<String, usize>>>) {
+    async fn new() -> HookProviderService {
         let settings = Settings::new().unwrap();
         println!("settings: {:#?}", settings);
         let producer = ClientConfig::new()
@@ -49,23 +46,18 @@ impl HookProviderService {
             .set("message.timeout.ms", "5000")
             .create()
             .expect("Producer creation error");
-        let metrics = Arc::new(RwLock::new(BTreeMap::new()));
-        return (
-            HookProviderService {
-                auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
-                kafka_producer: producer,
-                settings: settings.clone(),
-                metrics: metrics.clone(),
-            },
-            metrics,
-        );
+        HookProviderService {
+            auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
+            kafka_producer: producer,
+            settings: settings.clone(),
+        }
     }
     async fn publish(&self, topic: &str, data: &serde_json::Value) {
-        {
-            let mut metrics = self.metrics.write().await;
-            let v = metrics.entry(topic.to_string()).or_insert(0);
-            *v += 1;
-        }
+        *metric::M
+            .write()
+            .await
+            .entry(format!("kafka.{}", topic))
+            .or_insert(0) += 1;
         let payload = &data.to_string();
         let record: FutureRecord<String, String> = FutureRecord::to(&topic).payload(payload);
         let status = self
@@ -84,6 +76,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ProviderLoadedRequest>,
     ) -> Result<Response<LoadedResponse>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_provider_loaded".to_string())
+            .or_insert(0) += 1;
         let broker = request.into_inner().broker.unwrap();
         println!("broker connected = {:?}", broker.sysdescr);
         Ok(Response::new(LoadedResponse {
@@ -102,6 +99,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientConnectRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_connect".to_string())
+            .or_insert(0) += 1;
         if let Some(conn_info) = request.into_inner().conninfo {
             let data = json!({
                 "node": conn_info.node,
@@ -125,6 +127,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientConnackRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_connack".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(conn_info) = req.conninfo {
             let data = json!({
@@ -149,6 +156,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientConnectedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_connected".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(conn_info) = req.clientinfo {
             let data = json!({
@@ -172,6 +184,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientDisconnectedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_disconnected".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(conn_info) = req.clientinfo {
             let data = json!({
@@ -194,6 +211,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientAuthenticateRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_authenticate".to_string())
+            .or_insert(0) += 1;
         if let Some(client_info) = request.into_inner().clientinfo {
             let verified = self
                 .auth
@@ -216,6 +238,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientCheckAclRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_check_acl".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         let username = req.clientinfo.unwrap().username;
         let passed = self.auth.check_acl(&username, req.r#type, &req.topic).await;
@@ -236,6 +263,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientSubscribeRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_subscribe".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(conn_info) = req.clientinfo {
             let data = json!({
@@ -260,6 +292,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<ClientUnsubscribeRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_client_unsubscribe".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(conn_info) = req.clientinfo {
             let data = json!({
@@ -285,6 +322,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<SessionCreatedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_created".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(client_info) = req.clientinfo {
             let data = json!({
@@ -305,6 +347,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<SessionSubscribedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_subscribed".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(client_info) = req.clientinfo {
             let mut data = json!({
@@ -335,6 +382,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<SessionUnsubscribedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_unsubscribed".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(client_info) = req.clientinfo {
             let data = json!({
@@ -361,6 +413,11 @@ impl HookProvider for HookProviderService {
         &self,
         _request: Request<SessionResumedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_resumed".to_string())
+            .or_insert(0) += 1;
         Ok(Response::new(EmptySuccess {}))
     }
 
@@ -368,6 +425,11 @@ impl HookProvider for HookProviderService {
         &self,
         _request: Request<SessionDiscardedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_discarded".to_string())
+            .or_insert(0) += 1;
         Ok(Response::new(EmptySuccess {}))
     }
 
@@ -375,6 +437,11 @@ impl HookProvider for HookProviderService {
         &self,
         _request: Request<SessionTakeoveredRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_takeovered".to_string())
+            .or_insert(0) += 1;
         Ok(Response::new(EmptySuccess {}))
     }
 
@@ -382,6 +449,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<SessionTerminatedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_session_terminated".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(client_info) = req.clientinfo {
             let data = json!({
@@ -403,6 +475,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<MessagePublishRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_message_publish".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(message) = req.message {
             let encoding;
@@ -443,6 +520,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<MessageDeliveredRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_message_delivered".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(message) = req.message {
             let mut data = json!({
@@ -473,6 +555,11 @@ impl HookProvider for HookProviderService {
         &self,
         _request: Request<MessageDroppedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_message_dropped".to_string())
+            .or_insert(0) += 1;
         Ok(Response::new(EmptySuccess {}))
     }
 
@@ -480,6 +567,11 @@ impl HookProvider for HookProviderService {
         &self,
         request: Request<MessageAckedRequest>,
     ) -> Result<Response<EmptySuccess>, Status> {
+        *metric::M
+            .write()
+            .await
+            .entry("hook.on_message_acked".to_string())
+            .or_insert(0) += 1;
         let req = request.into_inner();
         if let Some(message) = req.message {
             let mut data = json!({
@@ -512,14 +604,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     health_reporter
         .set_serving::<HookProviderServer<HookProviderService>>()
         .await;
-    let (svc, metrics) = HookProviderService::new().await;
+    let svc = HookProviderService::new().await;
     let addr = "0.0.0.0:10000".parse().unwrap();
 
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(30));
         loop {
             ticker.tick().await;
-            println!("metrics: {:#?}", metrics.read().await)
+            println!("metrics: {:#?}", metric::M.read().await)
         }
     });
 
