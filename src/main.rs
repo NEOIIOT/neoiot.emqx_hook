@@ -1,7 +1,9 @@
-mod proto;
-// pub mod proto {
-//     tonic::include_proto!("emqx.exhook.v1");
-// }
+mod auth;
+// mod proto;
+
+pub mod proto {
+    tonic::include_proto!("emqx.exhook.v1");
+}
 
 use proto::{
     hook_provider_server::HookProvider, hook_provider_server::HookProviderServer,
@@ -14,6 +16,8 @@ use proto::{
     SessionUnsubscribedRequest, ValuedResponse,
 };
 
+use crate::auth::AuthPostgres;
+use crate::proto::valued_response::{ResponsedType, Value};
 use chrono::{TimeZone, Utc};
 use rdkafka::{
     producer::{FutureProducer, FutureRecord},
@@ -26,7 +30,7 @@ use tonic::{
     Request, Response, Status,
 };
 
-const ALL_HOOKS: [&str; 13] = [
+const AVAILABLE_HOOKS: [&str; 13] = [
     "ON_CLIENT_CONNECT",
     "ON_CLIENT_CONNACK",
     "ON_CLIENT_CONNECTED",
@@ -40,8 +44,6 @@ const ALL_HOOKS: [&str; 13] = [
     "ON_MESSAGE_PUBLISH",
     "ON_MESSAGE_DELIVERED",
     "ON_MESSAGE_ACKED",
-    // "ON_CLIENT_AUTHENTICATE",
-    // "ON_CLIENT_CHECK_ACL",
     // "ON_SESSION_RESUMED",
     // "ON_SESSION_DISCARDED",
     // "ON_SESSION_TAKEOVERED",
@@ -51,10 +53,11 @@ const ALL_HOOKS: [&str; 13] = [
 struct HookProviderService {
     loaded_hooks: Arc<HashMap<String, KafkaConfig>>,
     producer: FutureProducer,
+    auth: AuthPostgres,
 }
 
 impl HookProviderService {
-    fn new() -> HookProviderService {
+    async fn new() -> HookProviderService {
         let brokers = env::var("KAFKA_BROKERS").expect("KAFKA_BROKERS must set");
         println!("brokers: {:?}", brokers);
         let producer = ClientConfig::new()
@@ -65,6 +68,7 @@ impl HookProviderService {
         HookProviderService {
             loaded_hooks: Arc::new(Self::load_hooks()),
             producer,
+            auth: AuthPostgres::new().await,
         }
     }
     async fn publish(&self, hook: &str, data: &serde_json::Value) {
@@ -89,12 +93,12 @@ impl HookProviderService {
     }
     fn load_hooks() -> HashMap<String, KafkaConfig> {
         let mut result = HashMap::new();
-        for &hook in ALL_HOOKS.iter() {
+        for &hook in AVAILABLE_HOOKS.iter() {
             if let Ok(topic) = env::var(format!("{}_TO_TOPIC", hook)) {
                 let action = hook[3..].replace("_", ".").to_lowercase();
                 let filters = env::var(format!("{}_FILTERS", hook))
-                    .unwrap_or("#".to_string())
-                    .split(",")
+                    .unwrap_or_else(|_| "#".to_string())
+                    .split(',')
                     .map(String::from)
                     .collect();
                 result.insert(action, KafkaConfig { topic, filters });
@@ -111,18 +115,23 @@ impl HookProvider for HookProviderService {
         request: Request<ProviderLoadedRequest>,
     ) -> Result<Response<LoadedResponse>, Status> {
         let broker = request.into_inner().broker.unwrap();
-        println!("broker.sysdescr = {:?}", broker.sysdescr);
-        println!("broker.uptime = {:?}", broker.uptime);
-        println!("broker.version = {:?}", broker.version);
-        println!("broker.datetime = {:?}", broker.datetime);
-        let hook_specs = self
-            .loaded_hooks
-            .iter()
-            .map(|(hook, config)| HookSpec {
+        println!("broker connected = {:?}", broker.sysdescr);
+        let mut hook_specs = vec![
+            HookSpec {
+                name: "client.authenticate".to_string(),
+                topics: vec![],
+            },
+            HookSpec {
+                name: "client.check_acl".to_string(),
+                topics: vec![],
+            },
+        ];
+        for (hook, config) in self.loaded_hooks.iter() {
+            hook_specs.push(HookSpec {
                 name: hook.clone(),
                 topics: config.filters.clone(),
             })
-            .collect();
+        }
         Ok(Response::new(LoadedResponse { hooks: hook_specs }))
     }
 
@@ -211,16 +220,44 @@ impl HookProvider for HookProviderService {
 
     async fn on_client_authenticate(
         &self,
-        _request: Request<ClientAuthenticateRequest>,
+        request: Request<ClientAuthenticateRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
+        if let Some(client_info) = request.into_inner().clientinfo {
+            let verified = self
+                .auth
+                .authenticate(&client_info.username, &client_info.password)
+                .await;
+            if verified {
+                return Ok(Response::new(ValuedResponse {
+                    r#type: ResponsedType::Continue as i32,
+                    value: Some(Value::BoolResult(true)),
+                }));
+            };
+        }
+        Ok(Response::new(ValuedResponse {
+            r#type: ResponsedType::StopAndReturn as i32,
+            value: Some(Value::BoolResult(false)),
+        }))
     }
 
     async fn on_client_check_acl(
         &self,
-        _request: Request<ClientCheckAclRequest>,
+        request: Request<ClientCheckAclRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
+        let req = request.into_inner();
+        let username = req.clientinfo.unwrap().username;
+        let passed = self.auth.check_acl(&username, req.r#type, &req.topic).await;
+        if passed {
+            Ok(Response::new(ValuedResponse {
+                r#type: ResponsedType::Continue as i32,
+                value: Some(Value::BoolResult(true)),
+            }))
+        } else {
+            Ok(Response::new(ValuedResponse {
+                r#type: ResponsedType::StopAndReturn as i32,
+                value: Some(Value::BoolResult(false)),
+            }))
+        }
     }
 
     async fn on_client_subscribe(
@@ -465,7 +502,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_name = <HookProviderServer<HookProviderService> as NamedService>::NAME;
     println!("{}", service_name);
 
-    let svc = HookProviderServer::new(HookProviderService::new());
+    let svc = HookProviderServer::new(HookProviderService::new().await);
     let addr = "0.0.0.0:10000".parse().unwrap();
 
     println!("HealthServer + HookProviderServer listening on {}", addr);
