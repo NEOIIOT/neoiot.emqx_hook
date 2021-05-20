@@ -11,6 +11,7 @@ image:
   tag: "latest"
 
 env:
+  POSTGRES_DSN: "postgres://neoiot:uTALXkhFg0@postgres-postgresql.neoiot.svc.cluster.local:5432/neoiot?sslmode=disable"
   KAFKA_BROKERS: "kafka.neoiot.svc.cluster.local:9092"
   ON_CLIENT_CONNECTED_TO_TOPIC: "emqx.events.client.connected"
   ON_CLIENT_DISCONNECTED_TO_TOPIC: "emqx.events.client.disconnected"
