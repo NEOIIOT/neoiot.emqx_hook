@@ -1,15 +1,13 @@
 use anyhow::{anyhow, Result};
 use lru_time_cache::LruCache;
-use sqlx::{types::Json, FromRow, PgPool};
+use sqlx::{FromRow, PgPool};
 use std::collections::HashSet;
 use std::{env, sync::Arc, time};
 use tokio::sync::Mutex;
 
-
 const ACL_EXPIRES: time::Duration = time::Duration::from_secs(60);
 
-
-const Q_USER: &str = "SELECT mqtt_secret, is_super FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = ? LIMIT 1";
+const Q_USER: &str = "SELECT mqtt_secret, is_super FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = $1 LIMIT 1";
 
 #[derive(FromRow)]
 pub struct UserInfo {
@@ -17,15 +15,15 @@ pub struct UserInfo {
     pub is_super: bool,
 }
 
-const Q_ACL: &str = "SELECT acl_pubs, acl_subs FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = ? LIMIT 1";
+const Q_ACL: &str = "SELECT acl_pubs, acl_subs FROM devices WHERE is_active = TRUE AND deleted_at IS NULL AND mqtt_username = $1 LIMIT 1";
 
 const PUBLISH: i32 = 0;
 const SUBSCRIBE: i32 = 1;
 
 #[derive(FromRow)]
 pub struct Acl {
-    pub acl_pubs: Json<Vec<String>>,
-    pub acl_subs: Json<Vec<String>>,
+    pub acl_pubs: Vec<String>,
+    pub acl_subs: Vec<String>,
 }
 
 pub struct AuthPostgres {
@@ -82,7 +80,7 @@ impl AuthPostgres {
             .bind(username)
             .fetch_one(&self.pg_pool)
             .await?;
-        Ok([user.acl_pubs.0, user.acl_subs.0])
+        Ok([user.acl_pubs, user.acl_subs])
     }
 
     async fn _get_acl(&self, username: &str) -> [Vec<String>; 2] {
