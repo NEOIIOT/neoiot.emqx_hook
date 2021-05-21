@@ -114,171 +114,51 @@ impl AuthPostgres {
             1 => rules = acl.acl_subs,
             _ => return false,
         }
-        return rules.iter().fold(false, |prev, filter| {
+        let passed = rules.iter().fold(false, |prev, filter| {
             if prev {
                 true
             } else {
-                matches(topic, filter).is_some()
+                matches(topic, filter)
             }
         });
+        if !passed{
+            println!("acl auth failed. username: {}, topic: {}, type: {}, white list: {:?}", username, topic, r#type, rules);
+        };
+        passed
     }
 }
 
-fn matches(topic: &str, filter: &str) -> Option<Vec<String>> {
-    // topic must not contain wildcards.
-    if topic.contains('+') || topic.contains('#') {
-        return None;
+pub fn matches(topic: &str, filter: &str) -> bool {
+    if !topic.is_empty() && topic[..1].contains('$') {
+        return false;
     }
-    if filter == topic {
-        return Some(vec![]);
-    }
-    if filter == "#" {
-        return Some(vec![topic.to_string()]);
-    }
-    let topics = topic.split('/').collect::<Vec<&str>>();
-    let filters = filter.split('/').collect::<Vec<&str>>();
 
-    let mut result = vec![];
+    let mut topics = topic.split('/');
+    let mut filters = filter.split('/');
 
-    let mut cursor = 0;
-    while cursor < topics.len() {
-        match filters.get(cursor) {
-            None => return None,
-            Some(&"+") => result.push(topics[cursor].to_string()),
-            Some(&"#") => {
-                result.push(topics[cursor..].join("/"));
-                return Some(result);
-            }
-            Some(&x) if x != topics[cursor] => return None,
-            _ => {}
+    for f in filters.by_ref() {
+        // "#" being the last element is validated by the broker with 'valid_filter'
+        if f == "#" {
+            return true;
         }
-        cursor += 1;
-    }
-    if let Some(&"#") = filters.get(cursor) {
-        cursor += 1;
-    }
-    if filters.len() == cursor {
-        return Some(result);
-    }
-    None
-}
 
-#[cfg(test)]
-mod test {
-    #[test]
-    fn topics_match_with_filters_as_expected() {
-        // full matching
-        assert_eq!(super::matches("test/123", "test/123"), Some(vec![]));
-        // no matching
-        assert!(super::matches("test/test/test", "test/test").is_none());
-        assert!(super::matches("test/test", "test/test/test").is_none());
-        assert!(super::matches("test/test", "test/test/test/test").is_none());
-        // matching #
-        assert_eq!(super::matches("test", "#"), Some(vec!["test".to_string()]));
-        assert_eq!(
-            super::matches("test/test", "#"),
-            Some(vec!["test/test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test", "#"),
-            Some(vec!["test/test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test", "test/#"),
-            Some(vec!["test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "test/#"),
-            Some(vec!["test/test".to_string()])
-        );
-        assert_eq!(super::matches("/", "/#"), Some(vec!["".to_string()]));
-        assert_eq!(
-            super::matches("/test", "/#"),
-            Some(vec!["test".to_string()])
-        );
-        assert_eq!(
-            super::matches("/test/", "/#"),
-            Some(vec!["test/".to_string()])
-        );
-        assert_eq!(super::matches("test/test", "test/test/#"), Some(vec![]));
-        // mismatching #
-        assert!(super::matches("test", "/#").is_none());
-        assert!(super::matches("", "test/#").is_none());
-        // matching +
-        assert_eq!(super::matches("test", "+"), Some(vec!["test".to_string()]));
-        assert_eq!(
-            super::matches("test/", "test/+"),
-            Some(vec!["".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test", "test/+"),
-            Some(vec!["test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "test/+/+"),
-            Some(vec!["test".to_string(), "test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "test/+/test"),
-            Some(vec!["test".to_string()])
-        );
-        // mismatching +
-        assert!(super::matches("test", "/+").is_none());
-        assert!(super::matches("test", "test/+").is_none());
-        assert!(super::matches("test/test", "test/test/+").is_none());
-        // matching + #
-        assert_eq!(
-            super::matches("test/test", "+/#"),
-            Some(vec!["test".to_string(), "test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/", "+/test/#"),
-            Some(vec!["test".to_string(), "".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/", "test/+/#"),
-            Some(vec!["test".to_string(), "".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "+/test/#"),
-            Some(vec!["test".to_string(), "test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "test/+/#"),
-            Some(vec!["test".to_string(), "test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "+/+/#"),
-            Some(vec![
-                "test".to_string(),
-                "test".to_string(),
-                "test".to_string()
-            ])
-        );
-        assert_eq!(
-            super::matches("test/test/test/test", "test/+/+/#"),
-            Some(vec![
-                "test".to_string(),
-                "test".to_string(),
-                "test".to_string()
-            ])
-        );
-        assert_eq!(
-            super::matches("test", "+/#"),
-            Some(vec!["test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test", "test/+/#"),
-            Some(vec!["test".to_string()])
-        );
-        assert_eq!(
-            super::matches("test/test/test", "test/+/test/#"),
-            Some(vec!["test".to_string()])
-        );
-
-        // invalid topic
-        assert!(super::matches("a/b/+", "#").is_none());
-        assert!(super::matches("a/+/c/d", "a/+/+/d").is_none());
-        assert!(super::matches("a/+/+/d", "a/+/c/d").is_none());
+        // filter still has remaining elements
+        // filter = a/b/c/# should match topci = a/b/c
+        // filter = a/b/c/d should not match topic = a/b/c
+        let top = topics.next();
+        match top {
+            Some(t) if t == "#" => return false,
+            Some(_) if f == "+" => continue,
+            Some(t) if f != t => return false,
+            Some(_) => continue,
+            None => return false,
+        }
     }
+
+    // topic has remaining elements and filter's last element isn't "#"
+    if topics.next().is_some() {
+        return false;
+    }
+
+    true
 }
