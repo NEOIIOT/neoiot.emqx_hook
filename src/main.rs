@@ -174,6 +174,7 @@ impl HookProvider for HookProviderService {
                 "disconnected_at": chrono::Utc::now().to_rfc3339(),
                 "reason": req.reason,
             });
+            self.auth.clear_cache(&conn_info.username).await;
             self.publish(
                 &self.settings.on_client_disconnected.as_ref().unwrap().topic,
                 &data,

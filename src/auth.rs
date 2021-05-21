@@ -55,17 +55,16 @@ impl AuthPostgres {
     }
 
     pub async fn authenticate(&self, username: &str, password: &str) -> bool {
-        let mut c = self.super_cache.lock().await;
         match self._query_user(username, password).await {
             Ok(u) => {
                 if u.is_super {
-                    c.insert(username.to_string());
+                    self.super_cache.lock().await.insert(username.to_string());
                 }
                 true
             }
             Err(err) => {
                 println!("authenticate failed :{}", err.to_string());
-                c.remove(&username.to_string());
+                self.clear_cache(username).await;
                 false
             }
         }
@@ -126,6 +125,10 @@ impl AuthPostgres {
         };
         passed
     }
+    pub async fn clear_cache(&self, username: &str){
+        self.super_cache.lock().await.remove(username);
+        self.acl_cache.lock().await.remove(username);
+    }
 }
 
 pub fn matches(topic: &str, filter: &str) -> bool {
@@ -147,7 +150,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
         // filter = a/b/c/d should not match topic = a/b/c
         let top = topics.next();
         match top {
-            Some(t) if t == "#" => return false,
+            Some("#") => return false,
             Some(_) if f == "+" => continue,
             Some(t) if f != t => return false,
             Some(_) => continue,
