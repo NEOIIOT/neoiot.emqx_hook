@@ -42,11 +42,7 @@ impl AuthPostgres {
     }
 
     async fn _query_user(&self, username: &str, password: &str) -> Result<UserInfo> {
-        *metric::M
-            .write()
-            .await
-            .entry("auth.query_user".to_string())
-            .or_insert(0) += 1;
+        metric::send("auth.query_user").await;
         println!("fetching remote user data");
         let user = sqlx::query_as::<_, UserInfo>(Q_USER)
             .bind(username)
@@ -76,11 +72,7 @@ impl AuthPostgres {
     }
 
     async fn _query_acl(&self, username: &str) -> Result<Acl> {
-        *metric::M
-            .write()
-            .await
-            .entry("auth.query_acl".to_string())
-            .or_insert(0) += 1;
+        metric::send("auth.query_acl").await;
         println!("fetching remote acl rules");
         let acl = sqlx::query_as::<_, Acl>(Q_ACL)
             .bind(username)
@@ -93,11 +85,7 @@ impl AuthPostgres {
         let mut c = self.acl_cache.lock().await;
         let cached = c.peek(username);
         if let Some(acl) = cached {
-            *metric::M
-                .write()
-                .await
-                .entry("auth.query_acl.hit_cache".to_string())
-                .or_insert(0) += 1;
+            metric::send("auth.query_acl.hit_cache").await;
             return acl.clone();
         }
         let new_acl = self._query_acl(username).await;

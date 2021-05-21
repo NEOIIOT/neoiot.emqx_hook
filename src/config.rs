@@ -41,7 +41,6 @@ impl Settings {
             },
         ];
         if let Some(c) = &self.on_client_connect {
-            parse_topics(c.filters.as_deref());
             hooks.push(HookSpec {
                 name: "client.connect".to_string(),
                 topics: parse_topics(c.filters.as_deref()),
@@ -118,6 +117,9 @@ impl Settings {
                 name: "message.delivered".to_string(),
                 topics: parse_topics(c.filters.as_deref()),
             });
+        }
+        for h in &hooks{
+            println!("loaded_hook: {:#?}", h.name)
         }
         hooks
     }
