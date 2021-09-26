@@ -6,8 +6,8 @@ ENV GRPC_HEALTH_PROBE_VERSION=v0.4.1
 ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 /grpc_health_probe
 
 WORKDIR ./neoiot_emqx_hook
-COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
+COPY ./.cargo ./.cargo
 RUN cargo build --release
 RUN rm src/*.rs
 
