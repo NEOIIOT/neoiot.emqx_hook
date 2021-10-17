@@ -118,7 +118,7 @@ impl Settings {
                 topics: parse_topics(c.filters.as_deref()),
             });
         }
-        for h in &hooks{
+        for h in &hooks {
             println!("loaded_hook: {:#?}", h.name)
         }
         hooks

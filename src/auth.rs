@@ -113,19 +113,25 @@ impl AuthPostgres {
             1 => rules = acl.acl_subs,
             _ => return false,
         }
-        let passed = rules.iter().fold(false, |prev, filter| {
-            if prev {
-                true
-            } else {
-                matches(topic, filter)
-            }
-        });
-        if !passed{
-            println!("acl auth failed. username: {}, topic: {}, type: {}, white list: {:?}", username, topic, r#type, rules);
+        let passed = rules.iter().fold(
+            false,
+            |prev, filter| {
+                if prev {
+                    true
+                } else {
+                    matches(topic, filter)
+                }
+            },
+        );
+        if !passed {
+            println!(
+                "acl auth failed. username: {}, topic: {}, type: {}, white list: {:?}",
+                username, topic, r#type, rules
+            );
         };
         passed
     }
-    pub async fn clear_cache(&self, username: &str){
+    pub async fn clear_cache(&self, username: &str) {
         self.super_cache.lock().await.remove(username);
         self.acl_cache.lock().await.remove(username);
     }

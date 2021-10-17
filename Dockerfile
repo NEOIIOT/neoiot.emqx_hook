@@ -16,7 +16,6 @@ ADD . ./
 RUN rm ./target/x86_64-unknown-linux-musl/release/deps/neoiot_emqx_hook*
 RUN cargo build --release
 
-
 FROM alpine:latest
 
 ARG APP=/usr/src/app
