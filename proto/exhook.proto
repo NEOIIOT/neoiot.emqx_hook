@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// Copyright (c) 2020-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
+// Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ service HookProvider {
 
   rpc OnClientAuthenticate(ClientAuthenticateRequest) returns (ValuedResponse) {};
 
-  rpc OnClientAuthorize(ClientAuthorizeRequest) returns (ValuedResponse) {};
+  rpc OnClientCheckAcl(ClientCheckAclRequest) returns (ValuedResponse) {};
 
   rpc OnClientSubscribe(ClientSubscribeRequest) returns (EmptySuccess) {};
 
@@ -117,18 +117,18 @@ message ClientAuthenticateRequest {
   bool result = 2;
 }
 
-message ClientAuthorizeRequest {
+message ClientCheckAclRequest {
 
   ClientInfo clientinfo = 1;
 
-  enum AuthorizeReqType {
+  enum AclReqType {
 
     PUBLISH = 0;
 
     SUBSCRIBE = 1;
   }
 
-  AuthorizeReqType type = 2;
+  AclReqType type = 2;
 
   string topic = 3;
 
@@ -231,14 +231,14 @@ message EmptySuccess { }
 message ValuedResponse {
 
   // The responsed value type
-  //  - contiune: Use the responsed value and execute the next hook
   //  - ignore: Ignore the responsed value
+  //  - contiune: Use the responsed value and execute the next hook
   //  - stop_and_return: Use the responsed value and stop the chain executing
   enum ResponsedType {
 
-    CONTINUE = 0;
+    IGNORE = 0;
 
-    IGNORE = 1;
+    CONTINUE = 1;
 
     STOP_AND_RETURN = 2;
   }
@@ -247,7 +247,7 @@ message ValuedResponse {
 
   oneof value {
 
-    // Boolean result, used on the 'client.authenticate', 'client.authorize' hooks
+    // Boolean result, used on the 'client.authenticate', 'client.check_acl' hooks
     bool bool_result = 3;
 
     // Message result, used on the 'message.*' hooks
@@ -261,7 +261,7 @@ message BrokerInfo {
 
   string sysdescr = 2;
 
-  int64 uptime = 3;
+  string uptime = 3;
 
   string datetime = 4;
 }
@@ -273,7 +273,7 @@ message HookSpec {
   // Available value:
   //   "client.connect",      "client.connack"
   //   "client.connected",    "client.disconnected"
-  //   "client.authenticate", "client.authorize"
+  //   "client.authenticate", "client.check_acl"
   //   "client.subscribe",    "client.unsubscribe"
   //
   //   "session.created",      "session.subscribed"
@@ -329,12 +329,6 @@ message ClientInfo {
   bool  is_superuser = 9;
 
   bool  anonymous = 10;
-
-  // common name of client TLS cert
-  string cn = 11;
-
-  // subject of client TLS cert
-  string dn = 12;
 }
 
 message Message {

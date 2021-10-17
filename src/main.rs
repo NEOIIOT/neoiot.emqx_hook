@@ -13,7 +13,7 @@ use proto::{
     hook_provider_server::HookProvider,
     hook_provider_server::HookProviderServer,
     valued_response::{ResponsedType, Value},
-    ClientAuthenticateRequest, ClientAuthorizeRequest, ClientConnackRequest, ClientConnectRequest,
+    ClientAuthenticateRequest, ClientCheckAclRequest, ClientConnackRequest, ClientConnectRequest,
     ClientConnectedRequest, ClientDisconnectedRequest, ClientSubscribeRequest,
     ClientUnsubscribeRequest, EmptySuccess, LoadedResponse, MessageAckedRequest,
     MessageDeliveredRequest, MessageDroppedRequest, MessagePublishRequest, ProviderLoadedRequest,
@@ -163,9 +163,9 @@ impl HookProvider for HookProviderService {
         }))
     }
 
-    async fn on_client_authorize(
+    async fn on_client_check_acl(
         &self,
-        request: Request<ClientAuthorizeRequest>,
+        request: Request<ClientCheckAclRequest>,
     ) -> Result<Response<ValuedResponse>, Status> {
         metric::send("hook.on_client_check_acl").await;
         let req = request.into_inner();

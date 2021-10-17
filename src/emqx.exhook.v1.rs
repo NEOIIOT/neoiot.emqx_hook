@@ -53,18 +53,18 @@ pub struct ClientAuthenticateRequest {
     pub result: bool,
 }
 #[derive(Serialize, Deserialize, Clone, PartialEq, ::prost::Message)]
-pub struct ClientAuthorizeRequest {
+pub struct ClientCheckAclRequest {
     #[prost(message, optional, tag = "1")]
     pub clientinfo: ::core::option::Option<ClientInfo>,
-    #[prost(enumeration = "client_authorize_request::AuthorizeReqType", tag = "2")]
+    #[prost(enumeration = "client_check_acl_request::AclReqType", tag = "2")]
     pub r#type: i32,
     #[prost(string, tag = "3")]
     pub topic: ::prost::alloc::string::String,
     #[prost(bool, tag = "4")]
     pub result: bool,
 }
-/// Nested message and enum types in `ClientAuthorizeRequest`.
-pub mod client_authorize_request {
+/// Nested message and enum types in `ClientCheckAclRequest`.
+pub mod client_check_acl_request {
     #[derive(
         Serialize,
         Deserialize,
@@ -79,7 +79,7 @@ pub mod client_authorize_request {
         ::prost::Enumeration,
     )]
     #[repr(i32)]
-    pub enum AuthorizeReqType {
+    pub enum AclReqType {
         Publish = 0,
         Subscribe = 1,
     }
@@ -187,8 +187,8 @@ pub struct ValuedResponse {
 /// Nested message and enum types in `ValuedResponse`.
 pub mod valued_response {
     /// The responsed value type
-    ///  - contiune: Use the responsed value and execute the next hook
     ///  - ignore: Ignore the responsed value
+    ///  - contiune: Use the responsed value and execute the next hook
     ///  - stop_and_return: Use the responsed value and stop the chain executing
     #[derive(
         Serialize,
@@ -205,13 +205,13 @@ pub mod valued_response {
     )]
     #[repr(i32)]
     pub enum ResponsedType {
-        Continue = 0,
-        Ignore = 1,
+        Ignore = 0,
+        Continue = 1,
         StopAndReturn = 2,
     }
     #[derive(Serialize, Deserialize, Clone, PartialEq, ::prost::Oneof)]
     pub enum Value {
-        /// Boolean result, used on the 'client.authenticate', 'client.authorize' hooks
+        /// Boolean result, used on the 'client.authenticate', 'client.check_acl' hooks
         #[prost(bool, tag = "3")]
         BoolResult(bool),
         /// Message result, used on the 'message.*' hooks
@@ -225,8 +225,8 @@ pub struct BrokerInfo {
     pub version: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub sysdescr: ::prost::alloc::string::String,
-    #[prost(int64, tag = "3")]
-    pub uptime: i64,
+    #[prost(string, tag = "3")]
+    pub uptime: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub datetime: ::prost::alloc::string::String,
 }
@@ -237,7 +237,7 @@ pub struct HookSpec {
     /// Available value:
     ///   "client.connect",      "client.connack"
     ///   "client.connected",    "client.disconnected"
-    ///   "client.authenticate", "client.authorize"
+    ///   "client.authenticate", "client.check_acl"
     ///   "client.subscribe",    "client.unsubscribe"
     ///
     ///   "session.created",      "session.subscribed"
@@ -294,12 +294,6 @@ pub struct ClientInfo {
     pub is_superuser: bool,
     #[prost(bool, tag = "10")]
     pub anonymous: bool,
-    /// common name of client TLS cert
-    #[prost(string, tag = "11")]
-    pub cn: ::prost::alloc::string::String,
-    /// subject of client TLS cert
-    #[prost(string, tag = "12")]
-    pub dn: ::prost::alloc::string::String,
 }
 #[derive(Serialize, Deserialize, Clone, PartialEq, ::prost::Message)]
 pub struct Message {
@@ -509,9 +503,9 @@ pub mod hook_provider_client {
             );
             self.inner.unary(request.into_request(), path, codec).await
         }
-        pub async fn on_client_authorize(
+        pub async fn on_client_check_acl(
             &mut self,
-            request: impl tonic::IntoRequest<super::ClientAuthorizeRequest>,
+            request: impl tonic::IntoRequest<super::ClientCheckAclRequest>,
         ) -> Result<tonic::Response<super::ValuedResponse>, tonic::Status> {
             self.inner.ready().await.map_err(|e| {
                 tonic::Status::new(
@@ -521,7 +515,7 @@ pub mod hook_provider_client {
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/emqx.exhook.v1.HookProvider/OnClientAuthorize",
+                "/emqx.exhook.v1.HookProvider/OnClientCheckAcl",
             );
             self.inner.unary(request.into_request(), path, codec).await
         }
@@ -781,9 +775,9 @@ pub mod hook_provider_server {
             &self,
             request: tonic::Request<super::ClientAuthenticateRequest>,
         ) -> Result<tonic::Response<super::ValuedResponse>, tonic::Status>;
-        async fn on_client_authorize(
+        async fn on_client_check_acl(
             &self,
-            request: tonic::Request<super::ClientAuthorizeRequest>,
+            request: tonic::Request<super::ClientCheckAclRequest>,
         ) -> Result<tonic::Response<super::ValuedResponse>, tonic::Status>;
         async fn on_client_subscribe(
             &self,
@@ -1104,20 +1098,20 @@ pub mod hook_provider_server {
                     };
                     Box::pin(fut)
                 }
-                "/emqx.exhook.v1.HookProvider/OnClientAuthorize" => {
+                "/emqx.exhook.v1.HookProvider/OnClientCheckAcl" => {
                     #[allow(non_camel_case_types)]
-                    struct OnClientAuthorizeSvc<T: HookProvider>(pub Arc<T>);
-                    impl<T: HookProvider> tonic::server::UnaryService<super::ClientAuthorizeRequest>
-                        for OnClientAuthorizeSvc<T>
+                    struct OnClientCheckAclSvc<T: HookProvider>(pub Arc<T>);
+                    impl<T: HookProvider> tonic::server::UnaryService<super::ClientCheckAclRequest>
+                        for OnClientCheckAclSvc<T>
                     {
                         type Response = super::ValuedResponse;
                         type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::ClientAuthorizeRequest>,
+                            request: tonic::Request<super::ClientCheckAclRequest>,
                         ) -> Self::Future {
                             let inner = self.0.clone();
-                            let fut = async move { (*inner).on_client_authorize(request).await };
+                            let fut = async move { (*inner).on_client_check_acl(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1125,7 +1119,7 @@ pub mod hook_provider_server {
                     let fut = async move {
                         let interceptor = inner.1.clone();
                         let inner = inner.0;
-                        let method = OnClientAuthorizeSvc(inner);
+                        let method = OnClientCheckAclSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = if let Some(interceptor) = interceptor {
                             tonic::server::Grpc::with_interceptor(codec, interceptor)
