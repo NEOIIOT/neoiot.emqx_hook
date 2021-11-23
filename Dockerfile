@@ -7,7 +7,6 @@ ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC
 
 WORKDIR ./neoiot_emqx_hook
 COPY ./Cargo.toml ./Cargo.toml
-COPY ./.cargo ./.cargo
 RUN cargo build --release
 RUN rm src/*.rs
 
@@ -23,15 +22,15 @@ ARG APP=/usr/src/app
 EXPOSE 10000
 
 ENV TZ=Etc/UTC \
-    APP_USER=appuser
+  APP_USER=appuser
 
 RUN addgroup -S $APP_USER \
-    && adduser -S -g $APP_USER $APP_USER
+  && adduser -S -g $APP_USER $APP_USER
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories
 RUN apk update \
-    && apk add --no-cache ca-certificates tzdata \
-    && rm -rf /var/cache/apk/*
+  && apk add --no-cache ca-certificates tzdata \
+  && rm -rf /var/cache/apk/*
 
 COPY --from=builder /grpc_health_probe /bin/grpc_health_probe
 RUN chmod +x /bin/grpc_health_probe
