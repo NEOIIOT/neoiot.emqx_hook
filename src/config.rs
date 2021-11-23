@@ -11,7 +11,7 @@ pub struct HookConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Settings {
     pub postgres_url: String,
-    pub kafka_brokers: String,
+    pub pulsar_url: String,
     pub acl_cache_ttl: u64,
     pub on_client_connect: Option<HookConfig>,
     pub on_client_connack: Option<HookConfig>,

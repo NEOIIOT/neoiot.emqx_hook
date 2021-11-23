@@ -13,7 +13,7 @@ image:
 env:
   NEOIOT_POSTGRES_URL: "postgres://neoiot:uTALXkhFg0@postgres-postgresql.neoiot.svc.cluster.local:5432/neoiot?sslmode=disable"
   NEOIOT_ACL_CACHE_TTL: 120
-  NEOIOT_KAFKA_BROKERS: "kafka.neoiot.svc.cluster.local:9092"
+  NEOIOT_PULSAR_URL: "kafka.neoiot.svc.cluster.local:9092"
   NEOIOT_ON_CLIENT_CONNECTED.TOPIC: "emqx.events.client.connected"
   NEOIOT_ON_CLIENT_DISCONNECTED.TOPIC: "emqx.events.client.disconnected"
   NEOIOT_ON_MESSAGE_PUBLISH.TOPIC: "emqx.events.message.publish"
