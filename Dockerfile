@@ -1,9 +1,8 @@
 FROM ekidd/rust-musl-builder:stable as builder
 
-RUN USER=root cargo new --bin neoiot_emqx_hook
-
 # ENV GRPC_HEALTH_PROBE_VERSION=v0.4.1
 # ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 /grpc_health_probe
+RUN cargo new --bin neoiot_emqx_hook
 
 WORKDIR ./neoiot_emqx_hook
 COPY ./Cargo.toml ./Cargo.toml
