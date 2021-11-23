@@ -2,11 +2,12 @@ FROM ekidd/rust-musl-builder:stable as builder
 
 RUN USER=root cargo new --bin neoiot_emqx_hook
 
-ENV GRPC_HEALTH_PROBE_VERSION=v0.4.1
-ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 /grpc_health_probe
+# ENV GRPC_HEALTH_PROBE_VERSION=v0.4.1
+# ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 /grpc_health_probe
 
 WORKDIR ./neoiot_emqx_hook
 COPY ./Cargo.toml ./Cargo.toml
+COPY ./.cargo ./.cargo
 RUN cargo build --release
 RUN rm src/*.rs
 
@@ -32,8 +33,8 @@ RUN apk update \
   && apk add --no-cache ca-certificates tzdata \
   && rm -rf /var/cache/apk/*
 
-COPY --from=builder /grpc_health_probe /bin/grpc_health_probe
-RUN chmod +x /bin/grpc_health_probe
+# COPY --from=builder /grpc_health_probe /bin/grpc_health_probe
+# RUN chmod +x /bin/grpc_health_probe
 COPY --from=builder /home/rust/src/neoiot_emqx_hook/target/x86_64-unknown-linux-musl/release/neoiot_emqx_hook ${APP}/neoiot_emqx_hook
 RUN chown -R $APP_USER:$APP_USER ${APP}
 
