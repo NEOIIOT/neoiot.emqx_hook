@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate serde;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -21,7 +21,10 @@ use proto::{
 };
 
 use crate::{auth::AuthPostgres, config::Settings};
-use pulsar::{Producer, Pulsar, TokioExecutor};
+use rdkafka::{
+    producer::{FutureProducer, FutureRecord},
+    ClientConfig,
+};
 
 mod auth;
 mod config;
@@ -31,8 +34,7 @@ pub mod proto;
 
 struct HookProviderService {
     settings: Settings,
-    producers: Arc<Mutex<HashMap<String, Producer<TokioExecutor>>>>,
-    pulsar: Pulsar<TokioExecutor>,
+    kafka_producer: FutureProducer,
     auth: AuthPostgres,
 }
 
@@ -40,43 +42,30 @@ impl HookProviderService {
     async fn new() -> HookProviderService {
         let settings = Settings::new().unwrap();
         println!("settings: {:#?}", settings);
-        let pulsar = Pulsar::builder(&settings.pulsar_url, TokioExecutor)
-            .build()
-            .await
-            .unwrap();
+        let producer = ClientConfig::new()
+            .set("bootstrap.servers", &settings.kafka_brokers)
+            .set("message.timeout.ms", "5000")
+            .create()
+            .expect("create kafka producer failed");
 
         HookProviderService {
-            producers: Arc::new(Mutex::new(HashMap::new())),
-            pulsar,
+            kafka_producer: producer,
             auth: AuthPostgres::new(&settings.postgres_url, settings.acl_cache_ttl).await,
             settings: settings.clone(),
         }
     }
 
     async fn publish<T: ?Sized + Serialize>(&self, topic: &str, data: &T) {
-        metric::send(&format!("pulsar.{}", topic)).await;
+        metric::send(&format!("kafka.{}", topic)).await;
         let payload = serde_json::to_string(data).unwrap();
-
-        let mut producers = self.producers.lock().await;
-        if !producers.contains_key(topic) {
-            let producer = self
-                .pulsar
-                .producer()
-                .with_topic(topic)
-                .with_name("exhook")
-                .build()
-                .await
-                .unwrap();
-            producers.insert(topic.into(), producer);
+        let record: FutureRecord<String, String> = FutureRecord::to(&topic).payload(&payload);
+        let status = self
+            .kafka_producer
+            .send(record, Duration::from_secs(5))
+            .await;
+        if let Err((err, _)) = status {
+            println!("message deliver failed to {}: {}", topic, err.to_string())
         }
-        let _ = producers
-            .get_mut(topic)
-            .unwrap()
-            .send(payload)
-            .await
-            .unwrap()
-            .await
-            .unwrap();
     }
 }
 
