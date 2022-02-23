@@ -1,10 +1,9 @@
 #[macro_use]
 extern crate serde;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use serde::Serialize;
-use tokio::sync::Mutex;
 use tonic::{transport::Server, Request, Response, Status};
 
 use proto::{

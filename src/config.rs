@@ -124,9 +124,10 @@ impl Settings {
         hooks
     }
     pub fn new() -> Result<Self, ConfigError> {
-        let mut settings = Config::default();
-        settings.merge(Environment::with_prefix("NEOIOT"))?;
-        settings.try_into()
+        let settings = Config::builder()
+            .add_source(Environment::with_prefix("NEOIOT"))
+            .build()?;
+        settings.try_deserialize()
     }
 }
 
